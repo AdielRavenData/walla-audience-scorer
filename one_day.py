@@ -67,6 +67,7 @@ class AudienceScorer:
         logger.info(f"Initialized AudienceScorer for project: {project_id}")
     
     def _generate_text(self, prompt: str, temperature: float = 0.0) -> str:
+        print("GOT HERE")
         """
         Generate text using Vertex AI Gemini model.
         
@@ -85,6 +86,7 @@ class AudienceScorer:
         }
         
         try:
+            print("GOT HERE 2")
             response = self.model.generate_content([prompt], generation_config=generation_config)
             return response.candidates[0].content.parts[0].text.strip()
         except Exception as e:
@@ -142,44 +144,14 @@ class AudienceScorer:
         """
         logger.info(f"Filtering content for audience: '{audience}'")
         
-        # Enhanced system prompt for better content filtering
+        # Shortened prompt for content filtering
         prompt = f"""
-You are an expert content strategist and audience analyst specializing in Hebrew and Israeli content platforms.
+Select relevant content for audience: "{audience}"
 
-TASK: Select the most relevant content verticals and categories for the target audience.
+VERTICALS: {verticals[:15]}
+CATEGORIES: {categories[:25]}
 
-TARGET AUDIENCE: "{audience}"
-
-AVAILABLE VERTICALS:
-{json.dumps(verticals, ensure_ascii=False, indent=2)}
-
-AVAILABLE CATEGORIES:
-{json.dumps(categories, ensure_ascii=False, indent=2)}
-
-SELECTION CRITERIA:
-1. Choose verticals and categories that are semantically relevant to the target audience
-2. Consider cultural context, Hebrew language nuances, and Israeli market specifics
-3. Include both direct matches and related/adjacent content that the audience might consume
-4. Prioritize content that indicates genuine interest or need from the target audience
-5. Consider seasonal, demographic, and behavioral patterns
-
-EXAMPLES:
-- For "הורים לתינוקות" (parents of babies): Include בריאות, אוכל, משפחה, טיפים
-- For "משקיעים צעירים" (young investors): Include כסף, קריירה, טכנולוגיה, נדל״ן
-- For "סטודנטים" (students): Include חינוך, קריירה, כסף, אוכל, בידור
-
-OUTPUT FORMAT:
-Return ONLY a JSON object in this exact format:
-{{
-  "verticals": ["vertical1", "vertical2", ...],
-  "categories": ["category1", "category2", ...]
-}}
-
-IMPORTANT:
-- Select ONLY from the provided lists
-- Do not invent or add content not in the lists
-- Return only the JSON object, no additional text
-- Be selective but comprehensive - aim for 3-8 verticals and 5-15 categories
+Return JSON: {{"verticals": ["v1", "v2"], "categories": ["c1", "c2"]}}
 """
         
         try:
@@ -398,28 +370,14 @@ IMPORTANT:
                 distinct_verticals = list(user['vertical_distribution'].keys())
                 distinct_categories = list(user['category_distribution'].keys())
                 
-                # Content-focused scoring prompt (shortened for performance)
+                # Ultra-short scoring prompt
                 prompt = f"""
-Score user relevance to target audience: "{audience}"
+Score 0.6-1.0 for "{audience}":
+Articles: {distinct_page_titles[:5]} {distinct_item_titles[:5]}
+Verticals: {distinct_verticals[:3]}
+Categories: {distinct_categories[:3]}
 
-USER CONTENT:
-Articles: {distinct_page_titles[:10]} {distinct_item_titles[:10]}
-Verticals: {distinct_verticals}
-Categories: {distinct_categories}
-
-SCORING (50% articles + 50% verticals/categories):
-- Article Score: How many articles match the audience?
-- Vertical/Category Score: How well do verticals/categories match?
-- Final = (Article × 0.5) + (Vertical/Category × 0.5)
-
-SCALE (0.6-1.0 only):
-- 0.9-1.0: Excellent match
-- 0.8-0.89: Good match  
-- 0.7-0.79: Moderate match
-- 0.6-0.69: Basic match
-
-CRITICAL: Return ONLY a single number between 0.6 and 1.0. No text, no explanation, no analysis. Just the number.
-Example: 0.75
+Return only number: 0.75
 """
                 
                 score_text = self._generate_text(prompt, temperature=0.1)
@@ -544,7 +502,7 @@ def main():
     print()
     
     # Get user inputs
-    audience = input("Enter target audience (e.g., 'הורים לתינוקות', 'משקיעים צעירים'): ").strip()
+    audience = input("Enter target audience (e.g., 'אקדמאים', 'משקיעים צעירים'): ").strip()
     
     target_date = input("Enter target date (YYYY-MM-DD, default: 2025-09-01): ").strip() or "2025-09-01"
     
