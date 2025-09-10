@@ -58,7 +58,7 @@ class AudienceScorer:
         self.project_id = project_id
         self.location = location
         self.bq_client = bigquery.Client(project=project_id)
-        self.src_table = "september_first_feature_vector_ai"
+        self.src_table = "september_first_feature_vector_ai_distinct"
         
         # Initialize Vertex AI
         vertexai.init(project=project_id, location=location)
@@ -275,8 +275,6 @@ IMPORTANT:
                 CategoryName,
                 page_title,
                 item_title,
-                hour_of_day,
-                day_of_week
             FROM `{self.project_id}.UsersClustering.{self.src_table}`
             WHERE event_date = '{target_date}'
               AND ({content_filter})
@@ -292,8 +290,6 @@ IMPORTANT:
                 CategoryName,
                 page_title,
                 item_title,
-                hour_of_day,
-                day_of_week
             FROM `{self.project_id}.UsersClustering.{self.src_table}`
             WHERE event_date = '{target_date}'
               AND ({content_filter})
