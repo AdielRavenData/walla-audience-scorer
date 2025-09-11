@@ -124,6 +124,158 @@ class AugustUserMetricsGenerator:
             logger.error(f"Error fetching data: {e}")
             raise
     
+    def calculate_audience_scores(self, df: pd.DataFrame, audience: str = 'אקדמאים', min_distinct_categories: int = 1) -> pd.DataFrame:
+        """
+        Calculate academic audience scores based on page title keyword matching.
+        
+        Args:
+            df: DataFrame with user interaction data
+            audience: Target audience name (default: 'אקדמאים' - academic)
+            min_distinct_categories: Minimum distinct categories required (default: 1)
+            
+        Returns:
+            pd.DataFrame: User academic audience scores with columns [user_unique_id, total_titles, audience_titles, score]
+        """
+        import re
+        
+        # Define comprehensive academic keyword patterns based on content analysis
+        stem_keywords = [
+            # Core academic terms
+            'אקדמ', 'אוניברסיט', 'מחקר', 'מדע', 'מדעי', 'פילוסופ', 'היסטור', 'סוציולוג', 'כלכל', 'ביולוג', 'כימ', 'פיז',
+            # Education and learning
+            'חינוך', 'לימוד', 'קורס', 'הרצאה', 'כנס', 'סמינר', 'השכלה', 'תואר', 'דוקטור', 'פרופסור',
+            # Culture and arts
+            'תרבות', 'אמנות', 'מוזיקה', 'שירה', 'ספר', 'ספרות', 'תיאטרון', 'מחול', 'בלט', 'אופרה',
+            # Analysis and criticism
+            'ביקורת', 'ניתוח', 'מאמר', 'כתב', 'מגזין', 'כתב עת', 'סקירה', 'דעה', 'דיון', 'ויכוח',
+            # Research and study
+            'סקר', 'סטטיסטיקה', 'נתונים', 'ממצאים', 'תוצאות', 'מסקנות', 'המלצות', 'הערכה'
+        ]
+        
+        exact_keywords = [
+            # Academic institutions and concepts
+            'אוניברסיטה', 'מכללה', 'מכון', 'מרכז מחקר', 'מעבדה', 'ספרייה', 'ארכיון', 'מוזיאון',
+            # Cultural and artistic terms
+            'ביקורת ספרים', 'ביקורת הופעה', 'ביקורת סרט', 'ביקורת תיאטרון', 'ביקורת אמנות',
+            'תרבות ישראלית', 'תרבות עברית', 'אמנות ישראלית', 'מוזיקה ישראלית', 'שירה עברית',
+            # Academic writing
+            'מאמר אקדמי', 'מחקר אקדמי', 'דוקטורט', 'תזה', 'דיסרטציה', 'מונוגרפיה',
+            # Historical and philosophical terms
+            'היסטוריה ישראלית', 'היסטוריה יהודית', 'פילוסופיה יהודית', 'מחשבת ישראל',
+            # Literary terms
+            'ספרות עברית', 'ספרות ישראלית', 'שירה עברית', 'פרוזה', 'שירה', 'רומן', 'נובלה',
+            # Academic events
+            'כנס אקדמי', 'הרצאה אקדמית', 'סמינר אקדמי', 'קונגרס', 'סימפוזיון'
+        ]
+        
+        negative_keywords = [
+            # Car and transportation (very common in dataset)
+            'רכב', 'מכונית', 'טיגו', 'היילקס', 'היברידי', 'חשמלית', 'דרכים', 'מבחן', 'מבחן דרכים', 'חוות דעת',
+            # Sports
+            'כדורגל', 'כדורסל', 'ליגה', 'שער', 'משחק', 'ספורט', 'מכבי', 'הפועל',
+            # Food and cooking
+            'מתכון', 'מסעד', 'בישול', 'השווארמ', 'אוכל', 'מסעדה', 'בישול',
+            # Entertainment and celebrities
+            'צפייה ישירה', 'VOD', 'פרק', 'סדרה', 'טריילר', 'לייב', 'פלייבוי', 'סלב', 'סלבס',
+            # Shopping and commerce
+            'שופינג', 'מבצע', 'חינם', 'קניון', 'קנייה', 'מחיר', 'שקל', 'אלף שקל',
+            # Technology (unless academic)
+            'iPhone', 'אנדרואיד', 'סמארטפון', 'אפליקציה', 'גיימינג', 'משחקים'
+        ]
+        
+        # Filter users with enough categories
+        if 'CategoryName' not in df.columns or 'page_title' not in df.columns:
+            logger.warning("CategoryName or page_title columns not found, skipping audience scoring")
+            return pd.DataFrame()
+        
+        # Clean and filter data
+        user_titles = df[
+            (df['page_title'].notna()) & 
+            (df['page_title'].str.strip() != '') &
+            (df['CategoryName'].notna()) & 
+            (df['CategoryName'].str.strip() != '')
+        ].copy()
+        
+        if user_titles.empty:
+            logger.warning("No valid page titles found for audience scoring")
+            return pd.DataFrame()
+        
+        # Normalize page titles
+        user_titles['page_title_norm'] = user_titles['page_title'].str.strip().str.replace(r'["״׳\s]+', ' ', regex=True)
+        user_titles['category_name'] = user_titles['CategoryName'].str.strip()
+        
+        # Filter users with enough distinct categories
+        user_category_counts = user_titles.groupby('user_unique_id')['category_name'].nunique()
+        eligible_users = user_category_counts[user_category_counts >= min_distinct_categories].index
+        
+        if len(eligible_users) == 0:
+            logger.warning(f"No users found with >= {min_distinct_categories} distinct categories")
+            return pd.DataFrame()
+        
+        # Filter to eligible users only
+        user_titles = user_titles[user_titles['user_unique_id'].isin(eligible_users)]
+        
+        # Create regex patterns
+        def escape_regex(text):
+            return re.escape(text)
+        
+        # Exact keywords pattern
+        exact_pattern = '|'.join(escape_regex(kw) for kw in exact_keywords)
+        exact_regex = f'(?i)(^|[^א-ת])({exact_pattern})([^א-ת]|$)'
+        
+        # Stem keywords pattern  
+        stem_pattern = '|'.join(escape_regex(kw) + '[א-ת]*' for kw in stem_keywords)
+        stem_regex = f'(?i)(^|[^א-ת])({stem_pattern})([^א-ת]|$)'
+        
+        # Negative keywords pattern
+        neg_pattern = '|'.join(escape_regex(kw) for kw in negative_keywords)
+        neg_regex = f'(?i)({neg_pattern})'
+        
+        # Score each page title
+        def score_title(title):
+            if pd.isna(title):
+                return False
+            
+            # Check for exact or stem matches
+            has_positive = bool(re.search(exact_regex, title) or re.search(stem_regex, title))
+            
+            # Check for negative matches
+            has_negative = bool(re.search(neg_regex, title))
+            
+            # Your logic: if we have positive keyword, it's academic (ignore negative)
+            # Only if we have ONLY negative keywords, then it's not academic
+            return has_positive
+        
+        # Apply scoring
+        user_titles['is_audience'] = user_titles['page_title_norm'].apply(score_title)
+        
+        # Calculate scores per user
+        user_scores = user_titles.groupby('user_unique_id').agg({
+            'page_title_norm': 'count',  # total_titles
+            'is_audience': 'sum'        # audience_titles
+        }).rename(columns={
+            'page_title_norm': 'total_titles',
+            'is_audience': 'audience_titles'
+        })
+        
+        # Calculate score ratio
+        user_scores['score'] = user_scores['audience_titles'] / user_scores['total_titles']
+        
+        # Add audience name
+        user_scores['audience'] = audience
+        
+        # Add score date
+        user_scores['score_date'] = pd.Timestamp.now().strftime('%Y-%m-%d')
+        
+        # Add total_views and audience_views (same as total_titles and audience_titles for now)
+        user_scores['total_views'] = user_scores['total_titles']
+        user_scores['audience_views'] = user_scores['audience_titles']
+        
+        logger.info(f"Calculated audience scores for {len(user_scores)} users")
+        
+        return user_scores.reset_index()
+
+
     def create_user_vectors(self, df: pd.DataFrame, use_vertical=False, use_category=False) -> pd.DataFrame:
         """
         Creates user feature vectors with behavioral metrics from interaction data.
@@ -294,8 +446,8 @@ class AugustUserMetricsGenerator:
         for col in demographic_cols:
             if col in df.columns:
                 try:
-                    # Get most frequent value per user
-                    most_frequent = df.groupby('user_unique_id')[col].agg(lambda x: x.mode().iloc[0] if not x.mode().empty else x.iloc[0])
+                    # Get most frequent value per user (count-based, not just first mode)
+                    most_frequent = df.groupby('user_unique_id')[col].agg(lambda x: x.value_counts().index[0] if len(x) > 0 else 'Unknown')
                     feature_dfs.append(most_frequent.to_frame(col))
                 except Exception as e:
                     logger.warning(f"Could not calculate most frequent {col}: {e}")
@@ -365,7 +517,7 @@ class AugustUserMetricsGenerator:
                 return pd.DataFrame()
             
             # Step 2: Create user vectors
-            print("🔄 Step 2/3: Creating user behavioral metrics...")
+            print("🔄 Step 2/4: Creating user behavioral metrics...")
             user_metrics = self.create_user_vectors(df)
             
             if user_metrics.empty:
@@ -373,8 +525,30 @@ class AugustUserMetricsGenerator:
                 print("⚠️ No user metrics generated")
                 return pd.DataFrame()
             
-            # Step 3: Save results
-            print("💾 Step 3/3: Saving results...")
+            # Step 3: Calculate academic audience scores
+            print("🎓 Step 3/4: Calculating academic audience scores...")
+            audience_scores = self.calculate_audience_scores(df, audience='אקדמאים', min_distinct_categories=1)
+            
+            # Merge audience scores with user metrics
+            if not audience_scores.empty:
+                # Merge on user_unique_id
+                user_metrics = user_metrics.merge(
+                    audience_scores[['user_unique_id', 'audience', 'score_date', 'total_views', 'audience_views', 'score']], 
+                    on='user_unique_id', 
+                    how='left'
+                )
+                print(f"✅ Added audience scores for {len(audience_scores)} users")
+            else:
+                # Add empty audience columns
+                user_metrics['audience'] = None
+                user_metrics['score_date'] = None
+                user_metrics['total_views'] = None
+                user_metrics['audience_views'] = None
+                user_metrics['score'] = None
+                print("⚠️ No audience scores calculated")
+            
+            # Step 4: Save results
+            print("💾 Step 4/4: Saving results...")
             user_metrics.to_csv(output_file, index=True)  # index=True to include user_unique_id
             print(f"✅ Results saved to: {output_file}")
             
@@ -393,6 +567,17 @@ class AugustUserMetricsGenerator:
                 print(f"Average weekend ratio: {user_metrics['weekend_ratio'].mean():.3f}")
             if 'vertical_diversity' in user_metrics.columns:
                 print(f"Average vertical diversity: {user_metrics['vertical_diversity'].mean():.1f}")
+            
+            # Show academic audience score statistics
+            if 'score' in user_metrics.columns and user_metrics['score'].notna().any():
+                scored_users = user_metrics[user_metrics['score'].notna()]
+                academic_users = scored_users[scored_users['score'] > 0]
+                print(f"Users with academic scores: {len(scored_users):,}")
+                print(f"Users with academic content: {len(academic_users):,}")
+                print(f"Average academic score: {scored_users['score'].mean():.3f}")
+                print(f"Max academic score: {scored_users['score'].max():.3f}")
+                if len(academic_users) > 0:
+                    print(f"Average score (academic users only): {academic_users['score'].mean():.3f}")
             
             # Show feature breakdown
             feature_types = {}
