@@ -43,6 +43,64 @@ class AugustUserMetricsGenerator:
     Generates user behavioral metrics from august_features table.
     """
     
+    # Academic-relevant verticals for filtering (expanded from 3 to 16)
+    ACADEMIC_VERTICALS = [
+        # Cultural & Arts
+        'תרבות', 'יהדות', 'פיס בתרבות',
+        # Professional & Business  
+        'קריירה', 'המומחים', 'זירת היועצים', 'עסקים קטנים', 'marketing',
+        # Health & Science
+        'בריאות', 'מדעני העתיד',
+        # Other Academic
+        'הנבחרים', 'טוב לדעת', 'עזרה', 'אולימפיאדת טוקיו 2020', 'מגזין', 'משפט'
+    ]
+    
+    # Academic keywords for content scoring
+    STEM_KEYWORDS = [
+        # Core academic terms
+        'אקדמ', 'אוניברסיט', 'מחקר', 'מדע', 'מדעי', 'פילוסופ', 'היסטור', 'סוציולוג', 'כלכל', 'ביולוג', 'כימ', 'פיז',
+        # Education and learning
+        'חינוך', 'לימוד', 'קורס', 'הרצאה', 'כנס', 'סמינר', 'השכלה', 'תואר', 'דוקטור', 'פרופסור',
+        # Culture and arts
+        'תרבות', 'אמנות', 'מוזיקה', 'שירה', 'ספר', 'ספרות', 'תיאטרון', 'מחול', 'בלט', 'אופרה',
+        # Analysis and criticism
+        'ביקורת', 'ניתוח', 'מאמר', 'כתב', 'מגזין', 'כתב עת', 'סקירה', 'דעה', 'דיון', 'ויכוח',
+        # Research and study
+        'סקר', 'סטטיסטיקה', 'נתונים', 'ממצאים', 'תוצאות', 'מסקנות', 'המלצות', 'הערכה'
+    ]
+    
+    EXACT_KEYWORDS = [
+        # Academic institutions and concepts
+        'אוניברסיטה', 'מכללה', 'מכון', 'מרכז מחקר', 'מעבדה', 'ספרייה', 'ארכיון', 'מוזיאון',
+        # Cultural and artistic terms
+        'ביקורת ספרים', 'ביקורת הופעה', 'ביקורת סרט', 'ביקורת תיאטרון', 'ביקורת אמנות',
+        'תרבות ישראלית', 'תרבות עברית', 'אמנות ישראלית', 'מוזיקה ישראלית', 'שירה עברית',
+        # Academic writing
+        'מאמר אקדמי', 'מחקר אקדמי', 'דוקטורט', 'תזה', 'דיסרטציה', 'מונוגרפיה',
+        # Historical and philosophical terms
+        'היסטוריה ישראלית', 'היסטוריה יהודית', 'פילוסופיה יהודית', 'מחשבת ישראל',
+        # Literary terms
+        'ספרות עברית', 'ספרות ישראלית', 'שירה עברית', 'פרוזה', 'שירה', 'רומן', 'נובלה',
+        # Academic events
+        'כנס אקדמי', 'הרצאה אקדמית', 'סמינר אקדמי', 'קונגרס', 'סימפוזיון'
+    ]
+    
+    # Negative keywords for academic content filtering
+    NEGATIVE_KEYWORDS = [
+        # Car and transportation (very common in dataset)
+        'רכב', 'מכונית', 'טיגו', 'היילקס', 'היברידי', 'חשמלית', 'דרכים', 'מבחן', 'מבחן דרכים', 'חוות דעת',
+        # Sports
+        'כדורגל', 'כדורסל', 'ליגה', 'שער', 'משחק', 'ספורט', 'מכבי', 'הפועל',
+        # Food and cooking
+        'מתכון', 'מסעד', 'בישול', 'השווארמ', 'אוכל', 'מסעדה', 'בישול',
+        # Entertainment and celebrities
+        'צפייה ישירה', 'VOD', 'פרק', 'סדרה', 'טריילר', 'לייב', 'פלייבוי', 'סלב', 'סלבס',
+        # Shopping and commerce
+        'שופינג', 'מבצע', 'חינם', 'קניון', 'קנייה', 'מחיר', 'שקל', 'אלף שקל',
+        # Technology (unless academic)
+        'iPhone', 'אנדרואיד', 'סמארטפון', 'אפליקציה', 'גיימינג', 'משחקים'
+    ]
+    
     def __init__(self, project_id: str = "wallabi-169712"):
         """
         Initialize the metrics generator.
@@ -56,62 +114,115 @@ class AugustUserMetricsGenerator:
         
         logger.info(f"Initialized AugustUserMetricsGenerator for project: {project_id}")
     
-    def fetch_august_data(self, max_users: int = None) -> pd.DataFrame:
+    def fetch_august_data(self, max_users: int = None, academic_verticals_only: bool = False) -> pd.DataFrame:
         """
         Fetch data from august_features table.
         
         Args:
             max_users (int): Optional limit on number of users to fetch
+            academic_verticals_only (bool): If True, only fetch users with academic vertical interactions
             
         Returns:
             pd.DataFrame: Raw interaction data
         """
         logger.info(f"Fetching data from {self.src_table}...")
         
-        # Build query with optional user limit
-        if max_users:
-            query = f"""
-            SELECT 
-                user_unique_id,
-                event_date,
-                time_stamp,
-                vertical_name,
-                CategoryName,
-                page_title,
-                item_title,
-                hour_of_day,
-                day_of_week,
-                region,
-                city,
-                device_category,
-                sector
-            FROM `{self.project_id}.UsersClustering.{self.src_table}`
-            WHERE user_unique_id IN (
-                SELECT DISTINCT user_unique_id 
+        # Build query with optional user limit and academic verticals filtering
+        if academic_verticals_only:
+            verticals_list = "', '".join(self.ACADEMIC_VERTICALS)
+            if max_users:
+                query = f"""
+                SELECT 
+                    user_unique_id,
+                    event_date,
+                    time_stamp,
+                    vertical_name,
+                    CategoryName,
+                    page_title,
+                    item_title,
+                    hour_of_day,
+                    day_of_week,
+                    region,
+                    city,
+                    device_category,
+                    sector
                 FROM `{self.project_id}.UsersClustering.{self.src_table}`
-                LIMIT {max_users}
-            )
-            ORDER BY user_unique_id, time_stamp
-            """
+                WHERE user_unique_id IN (
+                    SELECT DISTINCT user_unique_id 
+                    FROM `{self.project_id}.UsersClustering.{self.src_table}`
+                    WHERE vertical_name IN ('{verticals_list}')
+                    LIMIT {max_users}
+                )
+                ORDER BY user_unique_id, time_stamp
+                """
+            else:
+                query = f"""
+                SELECT 
+                    user_unique_id,
+                    event_date,
+                    time_stamp,
+                    vertical_name,
+                    CategoryName,
+                    page_title,
+                    item_title,
+                    hour_of_day,
+                    day_of_week,
+                    region,
+                    city,
+                    device_category,
+                    sector
+                FROM `{self.project_id}.UsersClustering.{self.src_table}`
+                WHERE user_unique_id IN (
+                    SELECT DISTINCT user_unique_id 
+                    FROM `{self.project_id}.UsersClustering.{self.src_table}`
+                    WHERE vertical_name IN ('{verticals_list}')
+                )
+                ORDER BY user_unique_id, time_stamp
+                """
         else:
-            query = f"""
-            SELECT 
-                user_unique_id,
-                event_date,
-                time_stamp,
-                vertical_name,
-                CategoryName,
-                page_title,
-                item_title,
-                hour_of_day,
-                day_of_week,
-                region,
-                city,
-                device_category,
-                sector
-            FROM `{self.project_id}.UsersClustering.{self.src_table}`
-            ORDER BY user_unique_id, time_stamp
-            """
+            if max_users:
+                query = f"""
+                SELECT 
+                    user_unique_id,
+                    event_date,
+                    time_stamp,
+                    vertical_name,
+                    CategoryName,
+                    page_title,
+                    item_title,
+                    hour_of_day,
+                    day_of_week,
+                    region,
+                    city,
+                    device_category,
+                    sector
+                FROM `{self.project_id}.UsersClustering.{self.src_table}`
+                WHERE user_unique_id IN (
+                    SELECT DISTINCT user_unique_id 
+                    FROM `{self.project_id}.UsersClustering.{self.src_table}`
+                    LIMIT {max_users}
+                )
+                ORDER BY user_unique_id, time_stamp
+                """
+            else:
+                query = f"""
+                SELECT 
+                    user_unique_id,
+                    event_date,
+                    time_stamp,
+                    vertical_name,
+                    CategoryName,
+                    page_title,
+                    item_title,
+                    hour_of_day,
+                    day_of_week,
+                    region,
+                    city,
+                    device_category,
+                    sector
+                FROM `{self.project_id}.UsersClustering.{self.src_table}`
+                ORDER BY user_unique_id, time_stamp
+                """
         
         try:
             print("⏳ Executing BigQuery query... (this may take several minutes)")
@@ -124,7 +235,7 @@ class AugustUserMetricsGenerator:
             logger.error(f"Error fetching data: {e}")
             raise
     
-    def calculate_audience_scores(self, df: pd.DataFrame, audience: str = 'אקדמאים', min_distinct_categories: int = 1) -> pd.DataFrame:
+    def calculate_audience_scores(self, df: pd.DataFrame, audience: str = 'אקדמאים', min_distinct_categories: int = 1, filter_verticals: bool = True) -> pd.DataFrame:
         """
         Calculate academic audience scores based on page title keyword matching.
         
@@ -132,56 +243,33 @@ class AugustUserMetricsGenerator:
             df: DataFrame with user interaction data
             audience: Target audience name (default: 'אקדמאים' - academic)
             min_distinct_categories: Minimum distinct categories required (default: 1)
+            filter_verticals: Whether to filter by academic-relevant verticals (default: True)
             
         Returns:
             pd.DataFrame: User academic audience scores with columns [user_unique_id, total_titles, audience_titles, score]
         """
         import re
         
-        # Define comprehensive academic keyword patterns based on content analysis
-        stem_keywords = [
-            # Core academic terms
-            'אקדמ', 'אוניברסיט', 'מחקר', 'מדע', 'מדעי', 'פילוסופ', 'היסטור', 'סוציולוג', 'כלכל', 'ביולוג', 'כימ', 'פיז',
-            # Education and learning
-            'חינוך', 'לימוד', 'קורס', 'הרצאה', 'כנס', 'סמינר', 'השכלה', 'תואר', 'דוקטור', 'פרופסור',
-            # Culture and arts
-            'תרבות', 'אמנות', 'מוזיקה', 'שירה', 'ספר', 'ספרות', 'תיאטרון', 'מחול', 'בלט', 'אופרה',
-            # Analysis and criticism
-            'ביקורת', 'ניתוח', 'מאמר', 'כתב', 'מגזין', 'כתב עת', 'סקירה', 'דעה', 'דיון', 'ויכוח',
-            # Research and study
-            'סקר', 'סטטיסטיקה', 'נתונים', 'ממצאים', 'תוצאות', 'מסקנות', 'המלצות', 'הערכה'
-        ]
+        # Use class constants for academic keyword patterns
         
-        exact_keywords = [
-            # Academic institutions and concepts
-            'אוניברסיטה', 'מכללה', 'מכון', 'מרכז מחקר', 'מעבדה', 'ספרייה', 'ארכיון', 'מוזיאון',
-            # Cultural and artistic terms
-            'ביקורת ספרים', 'ביקורת הופעה', 'ביקורת סרט', 'ביקורת תיאטרון', 'ביקורת אמנות',
-            'תרבות ישראלית', 'תרבות עברית', 'אמנות ישראלית', 'מוזיקה ישראלית', 'שירה עברית',
-            # Academic writing
-            'מאמר אקדמי', 'מחקר אקדמי', 'דוקטורט', 'תזה', 'דיסרטציה', 'מונוגרפיה',
-            # Historical and philosophical terms
-            'היסטוריה ישראלית', 'היסטוריה יהודית', 'פילוסופיה יהודית', 'מחשבת ישראל',
-            # Literary terms
-            'ספרות עברית', 'ספרות ישראלית', 'שירה עברית', 'פרוזה', 'שירה', 'רומן', 'נובלה',
-            # Academic events
-            'כנס אקדמי', 'הרצאה אקדמית', 'סמינר אקדמי', 'קונגרס', 'סימפוזיון'
-        ]
         
-        negative_keywords = [
-            # Car and transportation (very common in dataset)
-            'רכב', 'מכונית', 'טיגו', 'היילקס', 'היברידי', 'חשמלית', 'דרכים', 'מבחן', 'מבחן דרכים', 'חוות דעת',
-            # Sports
-            'כדורגל', 'כדורסל', 'ליגה', 'שער', 'משחק', 'ספורט', 'מכבי', 'הפועל',
-            # Food and cooking
-            'מתכון', 'מסעד', 'בישול', 'השווארמ', 'אוכל', 'מסעדה', 'בישול',
-            # Entertainment and celebrities
-            'צפייה ישירה', 'VOD', 'פרק', 'סדרה', 'טריילר', 'לייב', 'פלייבוי', 'סלב', 'סלבס',
-            # Shopping and commerce
-            'שופינג', 'מבצע', 'חינם', 'קניון', 'קנייה', 'מחיר', 'שקל', 'אלף שקל',
-            # Technology (unless academic)
-            'iPhone', 'אנדרואיד', 'סמארטפון', 'אפליקציה', 'גיימינג', 'משחקים'
-        ]
+        # Store original dataframe for total views calculation
+        df_original = df.copy()
+        
+        # Filter by academic-relevant verticals if requested
+        if filter_verticals and 'vertical_name' in df.columns:
+            original_count = len(df)
+            df_filtered = df[df['vertical_name'].isin(self.ACADEMIC_VERTICALS)].copy()
+            filtered_count = len(df_filtered)
+            logger.info(f"Filtered to academic verticals: {original_count} -> {filtered_count} rows ({filtered_count/original_count*100:.1f}%)")
+            
+            if filtered_count == 0:
+                logger.warning("No data remaining after vertical filtering")
+                return pd.DataFrame()
+            
+            df = df_filtered
+        else:
+            logger.info("Using all verticals for audience scoring")
         
         # Filter users with enough categories
         if 'CategoryName' not in df.columns or 'page_title' not in df.columns:
@@ -220,15 +308,15 @@ class AugustUserMetricsGenerator:
             return re.escape(text)
         
         # Exact keywords pattern
-        exact_pattern = '|'.join(escape_regex(kw) for kw in exact_keywords)
+        exact_pattern = '|'.join(escape_regex(kw) for kw in self.EXACT_KEYWORDS)
         exact_regex = f'(?i)(^|[^א-ת])({exact_pattern})([^א-ת]|$)'
         
         # Stem keywords pattern  
-        stem_pattern = '|'.join(escape_regex(kw) + '[א-ת]*' for kw in stem_keywords)
+        stem_pattern = '|'.join(escape_regex(kw) + '[א-ת]*' for kw in self.STEM_KEYWORDS)
         stem_regex = f'(?i)(^|[^א-ת])({stem_pattern})([^א-ת]|$)'
         
         # Negative keywords pattern
-        neg_pattern = '|'.join(escape_regex(kw) for kw in negative_keywords)
+        neg_pattern = '|'.join(escape_regex(kw) for kw in self.NEGATIVE_KEYWORDS)
         neg_regex = f'(?i)({neg_pattern})'
         
         # Score each page title
@@ -249,17 +337,27 @@ class AugustUserMetricsGenerator:
         # Apply scoring
         user_titles['is_audience'] = user_titles['page_title_norm'].apply(score_title)
         
-        # Calculate scores per user
+        # Calculate scores per user (only on filtered verticals)
         user_scores = user_titles.groupby('user_unique_id').agg({
-            'page_title_norm': 'count',  # total_titles
-            'is_audience': 'sum'        # audience_titles
+            'page_title_norm': 'count',  # This is now the filtered count
+            'is_audience': 'sum'        # This is the academic count from filtered data
         }).rename(columns={
-            'page_title_norm': 'total_titles',
-            'is_audience': 'audience_titles'
+            'page_title_norm': 'audience_titles',  # Views in academic-relevant verticals
+            'is_audience': 'academic_titles'       # Academic content from filtered verticals
         })
         
-        # Calculate score ratio
-        user_scores['score'] = user_scores['audience_titles'] / user_scores['total_titles']
+        # Get total views from ALL verticals (not just filtered ones)
+        if filter_verticals:
+            # Get total page views from original dataset (all verticals)
+            total_views = df_original.groupby('user_unique_id').size().rename('total_views')
+            user_scores = user_scores.join(total_views, how='left')
+            user_scores['total_views'] = user_scores['total_views'].fillna(0)
+        else:
+            # If not filtering, total views = audience titles
+            user_scores['total_views'] = user_scores['audience_titles']
+        
+        # Calculate score as ratio of academic content from filtered verticals
+        user_scores['score'] = user_scores['academic_titles'] / user_scores['audience_titles']
         
         # Add audience name
         user_scores['audience'] = audience
@@ -267,9 +365,8 @@ class AugustUserMetricsGenerator:
         # Add score date
         user_scores['score_date'] = pd.Timestamp.now().strftime('%Y-%m-%d')
         
-        # Add total_views and audience_views (same as total_titles and audience_titles for now)
-        user_scores['total_views'] = user_scores['total_titles']
-        user_scores['audience_views'] = user_scores['audience_titles']
+        # Rename columns to match expected output
+        user_scores['audience_views'] = user_scores['academic_titles']
         
         logger.info(f"Calculated audience scores for {len(user_scores)} users")
         
@@ -447,7 +544,7 @@ class AugustUserMetricsGenerator:
             if col in df.columns:
                 try:
                     # Get most frequent value per user (count-based, not just first mode)
-                    most_frequent = df.groupby('user_unique_id')[col].agg(lambda x: x.value_counts().index[0] if len(x) > 0 else 'Unknown')
+                    most_frequent = df.groupby('user_unique_id')[col].agg(lambda x: x.value_counts().index[0] if len(x) > 0 and len(x.value_counts()) > 0 else 'Unknown')
                     feature_dfs.append(most_frequent.to_frame(col))
                 except Exception as e:
                     logger.warning(f"Could not calculate most frequent {col}: {e}")
@@ -507,9 +604,9 @@ class AugustUserMetricsGenerator:
         print("🚀 Starting August user metrics generation...")
         
         try:
-            # Step 1: Fetch data
-            print("📊 Step 1/3: Fetching data from august_feature...")
-            df = self.fetch_august_data(max_users)
+            # Step 1: Fetch data (only users with academic vertical interactions)
+            print("📊 Step 1/3: Fetching data from august_feature (academic users only)...")
+            df = self.fetch_august_data(max_users, academic_verticals_only=True)
             
             if df.empty:
                 logger.warning("No data found")
@@ -525,9 +622,9 @@ class AugustUserMetricsGenerator:
                 print("⚠️ No user metrics generated")
                 return pd.DataFrame()
             
-            # Step 3: Calculate academic audience scores
+            # Step 3: Calculate academic audience scores (no vertical filtering needed - already pre-filtered)
             print("🎓 Step 3/4: Calculating academic audience scores...")
-            audience_scores = self.calculate_audience_scores(df, audience='אקדמאים', min_distinct_categories=1)
+            audience_scores = self.calculate_audience_scores(df, audience='אקדמאים', min_distinct_categories=1, filter_verticals=False)
             
             # Merge audience scores with user metrics
             if not audience_scores.empty:
