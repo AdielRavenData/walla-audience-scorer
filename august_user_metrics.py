@@ -466,6 +466,14 @@ class AugustUserMetricsGenerator:
         feature_dfs.append(activity_counts.to_frame())
         logger.info("Created activity count features")
         
+        # Calculate first and last view dates
+        date_stats = df_sorted.groupby('user_unique_id')['event_date'].agg(['min', 'max']).rename(columns={
+            'min': 'first_view',
+            'max': 'last_view'
+        })
+        feature_dfs.append(date_stats)
+        logger.info("Created date range features")
+        
         # Create derived time columns if possible
         if 'datetime' in df.columns and 'day_of_week' not in df.columns:
             df_sorted['day_of_week'] = df_sorted['datetime'].dt.dayofweek
@@ -555,7 +563,14 @@ class AugustUserMetricsGenerator:
         # Combine all features
         if feature_dfs:
             user_features = pd.concat([df for df in feature_dfs if not df.empty], axis=1)
-            user_features = user_features.fillna(0)
+            # Fill missing values (handle date columns separately)
+            for col in user_features.columns:
+                if 'date' in str(user_features[col].dtype).lower() or col in ['first_view', 'last_view']:
+                    # For date columns, don't fill - leave as is
+                    continue
+                else:
+                    # For numeric columns, fill with 0
+                    user_features[col] = user_features[col].fillna(0)
         else:
             # If no features were created, create a basic DataFrame with user_unique_id
             user_ids = df['user_unique_id'].unique()
@@ -589,13 +604,15 @@ class AugustUserMetricsGenerator:
         logger.info(f"Created user feature vectors with {user_features.shape[1]} features for {user_features.shape[0]} users")
         return user_features
     
-    def generate_metrics(self, max_users: int = None, output_file: str = "august_user_metrics.csv") -> pd.DataFrame:
+    def generate_metrics(self, max_users: int = None, output_file: str = "august_user_metrics.csv", append_to_table: bool = False, table_name: str = "users_with_audience_score") -> pd.DataFrame:
         """
         Main method to generate user metrics from august data.
         
         Args:
             max_users (int): Optional limit on number of users
             output_file (str): Output CSV file path
+            append_to_table (bool): Whether to append results to BigQuery table
+            table_name (str): BigQuery table name for appending results
             
         Returns:
             pd.DataFrame: User behavioral metrics
@@ -649,6 +666,11 @@ class AugustUserMetricsGenerator:
             user_metrics.to_csv(output_file, index=True)  # index=True to include user_unique_id
             print(f"✅ Results saved to: {output_file}")
             
+            # Step 5: Append to BigQuery table if requested
+            if append_to_table:
+                print(f"📊 Step 5/5: Appending to BigQuery table...")
+                self._append_to_bigquery_table(user_metrics, table_name)
+            
             # Show summary
             print(f"\n📈 Summary:")
             print(f"Total users: {len(user_metrics):,}")
@@ -694,6 +716,47 @@ class AugustUserMetricsGenerator:
         except Exception as e:
             logger.error(f"Error in metrics generation: {e}")
             raise
+    
+    def _append_to_bigquery_table(self, df: pd.DataFrame, table_name: str) -> None:
+        """
+        Append results to BigQuery table.
+        
+        Args:
+            df: DataFrame with user metrics
+            table_name: BigQuery table name
+        """
+        try:
+            # Prepare table reference
+            table_id = f"{self.project_id}.UsersClustering.{table_name}"
+            
+            # Reset index to make user_unique_id a column
+            df_to_upload = df.reset_index()
+            
+            # Configure job
+            job_config = bigquery.LoadJobConfig(
+                write_disposition="WRITE_APPEND",  # Append mode
+                create_disposition="CREATE_IF_NEEDED",  # Create table if doesn't exist
+                autodetect=True  # Auto-detect schema
+            )
+            
+            # Upload data
+            print(f"📤 Uploading {len(df_to_upload):,} rows to {table_id}...")
+            job = self.bq_client.load_table_from_dataframe(
+                df_to_upload, 
+                table_id, 
+                job_config=job_config
+            )
+            
+            # Wait for job to complete
+            job.result()
+            
+            print(f"✅ Successfully appended {len(df_to_upload):,} rows to {table_id}")
+            logger.info(f"Appended {len(df_to_upload)} rows to BigQuery table {table_id}")
+            
+        except Exception as e:
+            logger.error(f"Error appending to BigQuery table: {e}")
+            print(f"❌ Error appending to BigQuery table: {e}")
+            raise
 
 
 def main():
@@ -711,14 +774,26 @@ def main():
     
     output_file = input("Enter output CSV file (default: august_user_metrics.csv): ").strip() or "august_user_metrics.csv"
     
+    # Ask about BigQuery table appending
+    append_choice = input("Do you want to append results to BigQuery table 'users_with_audience_score'? (y/n): ").strip().lower()
+    append_to_table = append_choice in ['y', 'yes']
+    
+    table_name = "users_with_audience_score"
+    if append_to_table:
+        custom_table = input(f"Enter custom table name (or press Enter for '{table_name}'): ").strip()
+        table_name = custom_table if custom_table else table_name
+    
     print(f"\nStarting metrics generation...")
     print(f"Max users: {max_users if max_users else 'All users'}")
     print(f"Output file: {output_file}")
+    print(f"Append to BigQuery table: {'Yes' if append_to_table else 'No'}")
+    if append_to_table:
+        print(f"Table name: {table_name}")
     print("-" * 50)
     
     # Initialize generator and run analysis
     generator = AugustUserMetricsGenerator()
-    results = generator.generate_metrics(max_users, output_file)
+    results = generator.generate_metrics(max_users, output_file, append_to_table, table_name)
     
     if results.empty:
         print("No results generated. Please check your inputs and try again.")
