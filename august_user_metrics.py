@@ -110,118 +110,141 @@ class AugustUserMetricsGenerator:
         """
         self.project_id = project_id
         self.bq_client = bigquery.Client(project=project_id)
-        self.src_table = "august_feature_small"
+        self.src_table = "august_feature"
         
         logger.info(f"Initialized AugustUserMetricsGenerator for project: {project_id}")
     
-    def fetch_august_data(self, max_users: int = None, academic_verticals_only: bool = False) -> pd.DataFrame:
+    def fetch_august_data(self, max_users: int = None, academic_verticals_only: bool = False, audience_title_filtering: bool = False) -> pd.DataFrame:
         """
         Fetch data from august_features table.
         
         Args:
             max_users (int): Optional limit on number of users to fetch
             academic_verticals_only (bool): If True, only fetch users with academic vertical interactions
+            audience_title_filtering (bool): If True, only fetch users who viewed audience-relevant page titles
             
         Returns:
             pd.DataFrame: Raw interaction data
         """
-        logger.info(f"Fetching data from {self.src_table}...")
+        logger.info(f"Fetching data from {self.src_table} (optimized: academic users only)...")
         
-        # Build query with optional user limit and academic verticals filtering
-        if academic_verticals_only:
+        # Build optimized query: first filter for users who viewed academic content, then get all their interactions
+        if audience_title_filtering:
+            # Most optimized: Only users who viewed audience-relevant page titles
+            query = self._build_audience_title_filtering_query(max_users)
+        elif academic_verticals_only:
             verticals_list = "', '".join(self.ACADEMIC_VERTICALS)
+            
+            # Create academic keywords pattern for page title filtering
+            stem_pattern = '|'.join(self.STEM_KEYWORDS)
+            exact_pattern = '|'.join(self.EXACT_KEYWORDS)
+            
             if max_users:
                 query = f"""
-                SELECT 
-                    user_unique_id,
-                    event_date,
-                    time_stamp,
-                    vertical_name,
-                    CategoryName,
-                    page_title,
-                    item_title,
-                    hour_of_day,
-                    day_of_week,
-                    region,
-                    city,
-                    device_category,
-                    sector
-                FROM `{self.project_id}.UsersClustering.{self.src_table}`
-                WHERE user_unique_id IN (
-                    SELECT DISTINCT user_unique_id 
+                WITH academic_users AS (
+                    SELECT DISTINCT user_unique_id
                     FROM `{self.project_id}.UsersClustering.{self.src_table}`
                     WHERE vertical_name IN ('{verticals_list}')
+                      AND page_title IS NOT NULL
+                      AND (
+                        -- Check for academic keywords in page titles
+                        REGEXP_CONTAINS(page_title, r'(?i)({stem_pattern})')
+                        OR
+                        -- Check for exact academic terms
+                        REGEXP_CONTAINS(page_title, r'(?i)({exact_pattern})')
+                      )
                     LIMIT {max_users}
                 )
-                ORDER BY user_unique_id, time_stamp
+                SELECT 
+                    t.user_unique_id,
+                    t.event_date,
+                    t.time_stamp,
+                    t.vertical_name,
+                    t.CategoryName,
+                    t.page_title,
+                    t.item_title,
+                    t.hour_of_day,
+                    t.day_of_week,
+                    t.region,
+                    t.city,
+                    t.device_category,
+                    t.sector
+                FROM `{self.project_id}.UsersClustering.{self.src_table}` t
+                INNER JOIN academic_users a ON t.user_unique_id = a.user_unique_id
                 """
             else:
                 query = f"""
-                SELECT 
-                    user_unique_id,
-                    event_date,
-                    time_stamp,
-                    vertical_name,
-                    CategoryName,
-                    page_title,
-                    item_title,
-                    hour_of_day,
-                    day_of_week,
-                    region,
-                    city,
-                    device_category,
-                    sector
-                FROM `{self.project_id}.UsersClustering.{self.src_table}`
-                WHERE user_unique_id IN (
-                    SELECT DISTINCT user_unique_id 
+                WITH academic_users AS (
+                    SELECT DISTINCT user_unique_id
                     FROM `{self.project_id}.UsersClustering.{self.src_table}`
                     WHERE vertical_name IN ('{verticals_list}')
+                      AND page_title IS NOT NULL
+                      AND (
+                        -- Check for academic keywords in page titles
+                        REGEXP_CONTAINS(page_title, r'(?i)({stem_pattern})')
+                        OR
+                        -- Check for exact academic terms
+                        REGEXP_CONTAINS(page_title, r'(?i)({exact_pattern})')
+                      )
                 )
-                ORDER BY user_unique_id, time_stamp
+                SELECT 
+                    t.user_unique_id,
+                    t.event_date,
+                    t.time_stamp,
+                    t.vertical_name,
+                    t.CategoryName,
+                    t.page_title,
+                    t.item_title,
+                    t.hour_of_day,
+                    t.day_of_week,
+                    t.region,
+                    t.city,
+                    t.device_category,
+                    t.sector
+                FROM `{self.project_id}.UsersClustering.{self.src_table}` t
+                INNER JOIN academic_users a ON t.user_unique_id = a.user_unique_id
                 """
         else:
             if max_users:
                 query = f"""
                 SELECT 
-                    user_unique_id,
-                    event_date,
-                    time_stamp,
-                    vertical_name,
-                    CategoryName,
-                    page_title,
-                    item_title,
-                    hour_of_day,
-                    day_of_week,
-                    region,
-                    city,
-                    device_category,
-                    sector
+                    t.user_unique_id,
+                    t.event_date,
+                    t.time_stamp,
+                    t.vertical_name,
+                    t.CategoryName,
+                    t.page_title,
+                    t.item_title,
+                    t.hour_of_day,
+                    t.day_of_week,
+                    t.region,
+                    t.city,
+                    t.device_category,
+                    t.sector
                 FROM `{self.project_id}.UsersClustering.{self.src_table}`
                 WHERE user_unique_id IN (
                     SELECT DISTINCT user_unique_id 
                     FROM `{self.project_id}.UsersClustering.{self.src_table}`
                     LIMIT {max_users}
                 )
-                ORDER BY user_unique_id, time_stamp
                 """
             else:
                 query = f"""
                 SELECT 
-                    user_unique_id,
-                    event_date,
-                    time_stamp,
-                    vertical_name,
-                    CategoryName,
-                    page_title,
-                    item_title,
-                    hour_of_day,
-                    day_of_week,
-                    region,
-                    city,
-                    device_category,
-                    sector
+                    t.user_unique_id,
+                    t.event_date,
+                    t.time_stamp,
+                    t.vertical_name,
+                    t.CategoryName,
+                    t.page_title,
+                    t.item_title,
+                    t.hour_of_day,
+                    t.day_of_week,
+                    t.region,
+                    t.city,
+                    t.device_category,
+                    t.sector
                 FROM `{self.project_id}.UsersClustering.{self.src_table}`
-                ORDER BY user_unique_id, time_stamp
                 """
         
         try:
@@ -234,6 +257,84 @@ class AugustUserMetricsGenerator:
         except Exception as e:
             logger.error(f"Error fetching data: {e}")
             raise
+    
+    def _build_audience_title_filtering_query(self, max_users: int = None) -> str:
+        """
+        Build optimized query that filters users based on audience-relevant page titles.
+        This is the most efficient approach for audience scoring.
+        
+        Args:
+            max_users (int): Optional limit on number of users
+            
+        Returns:
+            str: BigQuery SQL query
+        """
+        # Create academic keywords pattern for page title filtering
+        academic_keywords = "', '".join(self.STEM_KEYWORDS + self.EXACT_KEYWORDS)
+        
+        # Build regex patterns for BigQuery
+        exact_pattern = "|".join([f"({kw})" for kw in self.EXACT_KEYWORDS])
+        stem_pattern = "|".join([f"({kw}[א-ת]*)" for kw in self.STEM_KEYWORDS])
+        
+        if max_users:
+            query = f"""
+            SELECT 
+                user_unique_id,
+                event_date,
+                time_stamp,
+                vertical_name,
+                CategoryName,
+                page_title,
+                item_title,
+                hour_of_day,
+                day_of_week,
+                region,
+                city,
+                device_category,
+                sector
+            FROM `{self.project_id}.UsersClustering.{self.src_table}`
+            WHERE user_unique_id IN (
+                SELECT DISTINCT user_unique_id 
+                FROM `{self.project_id}.UsersClustering.{self.src_table}`
+                WHERE page_title IS NOT NULL 
+                AND TRIM(page_title) != ''
+                AND (
+                    REGEXP_CONTAINS(page_title, r'(?i)({exact_pattern})') OR
+                    REGEXP_CONTAINS(page_title, r'(?i)({stem_pattern})')
+                )
+                LIMIT {max_users}
+            )
+            """
+        else:
+            query = f"""
+            SELECT 
+                user_unique_id,
+                event_date,
+                time_stamp,
+                vertical_name,
+                CategoryName,
+                page_title,
+                item_title,
+                hour_of_day,
+                day_of_week,
+                region,
+                city,
+                device_category,
+                sector
+            FROM `{self.project_id}.UsersClustering.{self.src_table}`
+            WHERE user_unique_id IN (
+                SELECT DISTINCT user_unique_id 
+                FROM `{self.project_id}.UsersClustering.{self.src_table}`
+                WHERE page_title IS NOT NULL 
+                AND TRIM(page_title) != ''
+                AND (
+                    REGEXP_CONTAINS(page_title, r'(?i)({exact_pattern})') OR
+                    REGEXP_CONTAINS(page_title, r'(?i)({stem_pattern})')
+                )
+            )
+            """
+        
+        return query
     
     def calculate_audience_scores(self, df: pd.DataFrame, audience: str = 'אקדמאים', min_distinct_categories: int = 1, filter_verticals: bool = True) -> pd.DataFrame:
         """
@@ -604,7 +705,7 @@ class AugustUserMetricsGenerator:
         logger.info(f"Created user feature vectors with {user_features.shape[1]} features for {user_features.shape[0]} users")
         return user_features
     
-    def generate_metrics(self, max_users: int = None, output_file: str = "august_user_metrics.csv", append_to_table: bool = False, table_name: str = "users_with_audience_score") -> pd.DataFrame:
+    def generate_metrics(self, max_users: int = None, output_file: str = "august_user_metrics.csv", append_to_table: bool = False, table_name: str = "users_with_audience_score", save_to_file: bool = True) -> pd.DataFrame:
         """
         Main method to generate user metrics from august data.
         
@@ -613,6 +714,7 @@ class AugustUserMetricsGenerator:
             output_file (str): Output CSV file path
             append_to_table (bool): Whether to append results to BigQuery table
             table_name (str): BigQuery table name for appending results
+            save_to_file (bool): Whether to save results to CSV file
             
         Returns:
             pd.DataFrame: User behavioral metrics
@@ -621,9 +723,9 @@ class AugustUserMetricsGenerator:
         print("🚀 Starting August user metrics generation...")
         
         try:
-            # Step 1: Fetch data (only users with academic vertical interactions)
-            print("📊 Step 1/3: Fetching data from august_feature (academic users only)...")
-            df = self.fetch_august_data(max_users, academic_verticals_only=True)
+            # Step 1: Fetch data (optimized: only users who viewed academic content)
+            print("📊 Step 1/3: Fetching data from august_feature (audience title filtering)...")
+            df = self.fetch_august_data(max_users, audience_title_filtering=True)
             
             if df.empty:
                 logger.warning("No data found")
@@ -663,8 +765,11 @@ class AugustUserMetricsGenerator:
             
             # Step 4: Save results
             print("💾 Step 4/4: Saving results...")
-            user_metrics.to_csv(output_file, index=True)  # index=True to include user_unique_id
-            print(f"✅ Results saved to: {output_file}")
+            if save_to_file:
+                user_metrics.to_csv(output_file, index=True)  # index=True to include user_unique_id
+                print(f"✅ Results saved to: {output_file}")
+            else:
+                print("⏭️ Skipping file save")
             
             # Step 5: Append to BigQuery table if requested
             if append_to_table:
@@ -774,6 +879,10 @@ def main():
     
     output_file = input("Enter output CSV file (default: august_user_metrics.csv): ").strip() or "august_user_metrics.csv"
     
+    # Ask about saving to file
+    save_choice = input(f"Do you want to save results to '{output_file}'? (y/n): ").strip().lower()
+    save_to_file = save_choice in ['y', 'yes']
+    
     # Ask about BigQuery table appending
     append_choice = input("Do you want to append results to BigQuery table 'users_with_audience_score'? (y/n): ").strip().lower()
     append_to_table = append_choice in ['y', 'yes']
@@ -786,6 +895,7 @@ def main():
     print(f"\nStarting metrics generation...")
     print(f"Max users: {max_users if max_users else 'All users'}")
     print(f"Output file: {output_file}")
+    print(f"Save to file: {'Yes' if save_to_file else 'No'}")
     print(f"Append to BigQuery table: {'Yes' if append_to_table else 'No'}")
     if append_to_table:
         print(f"Table name: {table_name}")
@@ -793,7 +903,7 @@ def main():
     
     # Initialize generator and run analysis
     generator = AugustUserMetricsGenerator()
-    results = generator.generate_metrics(max_users, output_file, append_to_table, table_name)
+    results = generator.generate_metrics(max_users, output_file, append_to_table, table_name, save_to_file)
     
     if results.empty:
         print("No results generated. Please check your inputs and try again.")
