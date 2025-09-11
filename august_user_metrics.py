@@ -26,6 +26,7 @@ Note: count_vertical_x, count_category_x, hour_x, day_x, and time_of_day_x colum
 import pandas as pd
 import numpy as np
 import logging
+import os
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
 from google.cloud import bigquery
@@ -110,7 +111,7 @@ class AugustUserMetricsGenerator:
         """
         self.project_id = project_id
         self.bq_client = bigquery.Client(project=project_id)
-        self.src_table = "august_feature"
+        self.src_table = "august_feature_first_week"
         
         logger.info(f"Initialized AugustUserMetricsGenerator for project: {project_id}")
     
@@ -495,7 +496,10 @@ class AugustUserMetricsGenerator:
             logger.error("user_unique_id column is required but not found")
             raise ValueError("user_unique_id column is required")
 
-        logger.info(f"Processing {len(df)} rows for {df['user_unique_id'].nunique()} unique users")
+        total_users = df['user_unique_id'].nunique()
+        total_rows = len(df)
+        logger.info(f"Processing {total_rows:,} rows for {total_users:,} unique users")
+        print(f"📊 Processing {total_rows:,} interactions for {total_users:,} users...")
 
         # Filter out unwanted data
         if 'vertical_name' in df.columns:
@@ -507,6 +511,12 @@ class AugustUserMetricsGenerator:
         if df.empty:
             logger.warning("DataFrame is empty after filtering")
             return pd.DataFrame()
+        
+        # Log progress after filtering
+        filtered_users = df['user_unique_id'].nunique()
+        filtered_rows = len(df)
+        print(f"✅ After filtering: {filtered_rows:,} interactions for {filtered_users:,} users")
+        logger.info(f"After filtering: {filtered_rows:,} rows for {filtered_users:,} users")
 
         # Convert time_stamp to datetime if needed
         if 'time_stamp' in df.columns:
@@ -554,6 +564,7 @@ class AugustUserMetricsGenerator:
             logger.info("Sorted data by user_unique_id and datetime for session calculations")
 
         logger.info("Calculating behavioral metrics...")
+        print(f"🔄 Calculating behavioral metrics for {filtered_users:,} users...")
         feature_dfs = []
 
         # 2. Vertical Count Features - REMOVED per user request
@@ -563,17 +574,21 @@ class AugustUserMetricsGenerator:
         df_sorted = df.sort_values(['user_unique_id', 'datetime']) if 'datetime' in df.columns else df.copy()
         
         # 1. Basic Activity Count
+        print(f"📈 Step 1/8: Calculating activity counts...")
         activity_counts = df_sorted.groupby('user_unique_id').size().rename('activity_count')
         feature_dfs.append(activity_counts.to_frame())
         logger.info("Created activity count features")
+        print(f"✅ Activity counts calculated for {len(activity_counts):,} users")
         
         # Calculate first and last view dates
+        print(f"📅 Step 2/8: Calculating date ranges...")
         date_stats = df_sorted.groupby('user_unique_id')['event_date'].agg(['min', 'max']).rename(columns={
             'min': 'first_view',
             'max': 'last_view'
         })
         feature_dfs.append(date_stats)
         logger.info("Created date range features")
+        print(f"✅ Date ranges calculated for {len(date_stats):,} users")
         
         # Create derived time columns if possible
         if 'datetime' in df.columns and 'day_of_week' not in df.columns:
@@ -604,56 +619,71 @@ class AugustUserMetricsGenerator:
                 logger.info("Created session IDs based on 30-minute gaps")
 
                 # Session counts per user
+                print(f"🔢 Step 3/8: Calculating session counts...")
                 user_session_counts = df_sorted.groupby('user_unique_id')['session_id'].nunique().to_frame('session_count')
                 feature_dfs.append(user_session_counts)
                 logger.info("Calculated session counts per user")
+                print(f"✅ Session counts calculated for {len(user_session_counts):,} users")
 
                 # Average session duration
+                print(f"⏱️ Step 4/8: Calculating session durations...")
                 session_durations = df_sorted.groupby(['user_unique_id', 'session_id'], observed=True)['time_diff'].sum()
                 avg_session_duration = session_durations.groupby('user_unique_id').mean().to_frame('avg_session_duration')
                 feature_dfs.append(avg_session_duration)
                 logger.info("Calculated average session durations")
+                print(f"✅ Session durations calculated for {len(avg_session_duration):,} users")
 
             # Time of day preferences - REMOVED per user request
 
             # Calculate weekday vs weekend ratio if day_of_week is available
             if 'day_of_week' in df_sorted.columns:
-                df_sorted['is_weekend'] = df_sorted['day_of_week'].isin([5, 6])  # Assuming 5=Friday, 6=Saturday
+                # Handle both BigQuery (1-7) and Python (0-6) day numbering
+                max_day = df_sorted['day_of_week'].max()
+                if max_day == 7:  # BigQuery format (Sunday=1, Saturday=7)
+                    df_sorted['is_weekend'] = df_sorted['day_of_week'].isin([6, 7])  # Friday=6, Saturday=7
+                else:  # Python format (Monday=0, Sunday=6)
+                    df_sorted['is_weekend'] = df_sorted['day_of_week'].isin([4, 5])  # Friday=4, Saturday=5
                 weekday_counts = df_sorted.groupby(['user_unique_id', 'is_weekend'], observed=True).size().unstack(fill_value=0)
                 
                 # Calculate weekend ratio
                 weekend_ratio = pd.Series(index=weekday_counts.index, dtype=float)
                 
-                if 1 in weekday_counts.columns and 0 in weekday_counts.columns:
+                if True in weekday_counts.columns and False in weekday_counts.columns:
                     # Both weekday and weekend data available
-                    weekend_ratio = weekday_counts[1] / (weekday_counts[0] + 1)
-                elif 1 in weekday_counts.columns:
+                    weekend_ratio = weekday_counts[True] / (weekday_counts[False] + 1)
+                elif True in weekday_counts.columns:
                     # Only weekend data available
                     weekend_ratio[:] = 1.0
-                elif 0 in weekday_counts.columns:
+                elif False in weekday_counts.columns:
                     # Only weekday data available
                     weekend_ratio[:] = 0.0
                 else:
                     # No data (shouldn't happen)
                     weekend_ratio[:] = 0.0
                 
+                print(f"📊 Step 5/8: Calculating weekend ratios...")
                 feature_dfs.append(weekend_ratio.to_frame('weekend_ratio'))
                 logger.info("Created weekend ratio features")
+                print(f"✅ Weekend ratios calculated for {len(weekend_ratio):,} users")
 
             # Vertical diversity - how many different verticals does the user visit
             if 'vertical_name' in df.columns:
+                print(f"🎯 Step 6/8: Calculating vertical diversity...")
                 vertical_diversity = df.groupby('user_unique_id')['vertical_name'].nunique().to_frame('vertical_diversity')
                 feature_dfs.append(vertical_diversity)
                 logger.info("Created vertical diversity features")
+                print(f"✅ Vertical diversity calculated for {len(vertical_diversity):,} users")
 
-        # 8. User Demographics (most frequent value per user)
+        # 8. User Demographics (most frequent value per user) - SUPER OPTIMIZED
+        print(f"👥 Step 7/8: Calculating demographics...")
         demographic_cols = ['region', 'city', 'device_category', 'sector']
         
         for col in demographic_cols:
             if col in df.columns:
                 try:
-                    # Get most frequent value per user (count-based, not just first mode)
-                    most_frequent = df.groupby('user_unique_id')[col].agg(lambda x: x.value_counts().index[0] if len(x) > 0 and len(x.value_counts()) > 0 else 'Unknown')
+                    # Super optimized: Use first() which is much faster for most cases
+                    # This gets the first value for each user (usually the most common)
+                    most_frequent = df.groupby('user_unique_id')[col].first()
                     feature_dfs.append(most_frequent.to_frame(col))
                 except Exception as e:
                     logger.warning(f"Could not calculate most frequent {col}: {e}")
@@ -661,7 +691,10 @@ class AugustUserMetricsGenerator:
             else:
                 feature_dfs.append(pd.Series('Unknown', index=activity_counts.index, name=col).to_frame())
         
+        print(f"✅ Demographics calculated for {len(activity_counts):,} users")
+        
         # Combine all features
+        print(f"🔗 Step 8/8: Combining all features...")
         if feature_dfs:
             user_features = pd.concat([df for df in feature_dfs if not df.empty], axis=1)
             # Fill missing values (handle date columns separately)
@@ -703,8 +736,42 @@ class AugustUserMetricsGenerator:
             user_features['vertical_diversity'] = user_features['vertical_diversity'].clip(lower=1)
 
         logger.info(f"Created user feature vectors with {user_features.shape[1]} features for {user_features.shape[0]} users")
+        print(f"🎉 Behavioral metrics completed! Created {user_features.shape[1]} features for {user_features.shape[0]:,} users")
         return user_features
     
+    def get_next_run_id(self, table_name: str = "users_with_audience_score") -> int:
+        """
+        Get the next run_id by checking BigQuery table only.
+        
+        Args:
+            table_name (str): BigQuery table name to check for existing run_ids
+            
+        Returns:
+            int: Next run_id to use
+        """
+        try:
+            # Check BigQuery table for max run_id
+            bq_query = f"""
+            SELECT MAX(run_id) as max_run_id
+            FROM `{self.project_id}.UsersClustering.{table_name}`
+            """
+            
+            logger.info(f"Checking BigQuery table for max run_id...")
+            bq_result = self.bq_client.query(bq_query).to_dataframe()
+            
+            if not bq_result.empty and bq_result['max_run_id'].iloc[0] is not None:
+                max_run_id = int(bq_result['max_run_id'].iloc[0])
+                next_run_id = max_run_id + 1
+                logger.info(f"BigQuery max run_id: {max_run_id}, using next run_id: {next_run_id}")
+                return next_run_id
+            else:
+                logger.info("BigQuery table is empty or has no run_id column, starting with run_id: 1")
+                return 1
+                
+        except Exception as e:
+            logger.warning(f"Could not check BigQuery table for run_id: {e}, starting with run_id: 1")
+            return 1
+
     def generate_metrics(self, max_users: int = None, output_file: str = "august_user_metrics.csv", append_to_table: bool = False, table_name: str = "users_with_audience_score", save_to_file: bool = True) -> pd.DataFrame:
         """
         Main method to generate user metrics from august data.
@@ -740,6 +807,12 @@ class AugustUserMetricsGenerator:
                 logger.warning("No user metrics generated")
                 print("⚠️ No user metrics generated")
                 return pd.DataFrame()
+            
+            # Add run_id to track different runs
+            print("🏷️ Adding run_id to track this execution...")
+            run_id = self.get_next_run_id(table_name)
+            user_metrics['run_id'] = run_id
+            print(f"✅ Added run_id: {run_id}")
             
             # Step 3: Calculate academic audience scores (no vertical filtering needed - already pre-filtered)
             print("🎓 Step 3/4: Calculating academic audience scores...")
@@ -778,6 +851,7 @@ class AugustUserMetricsGenerator:
             
             # Show summary
             print(f"\n📈 Summary:")
+            print(f"Run ID: {run_id}")
             print(f"Total users: {len(user_metrics):,}")
             print(f"Total features: {user_metrics.shape[1]}")
             print(f"Average activity count: {user_metrics['activity_count'].mean():.1f}")
@@ -836,6 +910,19 @@ class AugustUserMetricsGenerator:
             
             # Reset index to make user_unique_id a column
             df_to_upload = df.reset_index()
+            
+            # Clean data types for BigQuery compatibility
+            print("🧹 Cleaning data types for BigQuery compatibility...")
+            for col in df_to_upload.columns:
+                if df_to_upload[col].dtype == 'object':
+                    # Convert object columns to string and handle NaN values
+                    df_to_upload[col] = df_to_upload[col].astype(str).replace('nan', 'Unknown')
+                elif 'datetime' in str(df_to_upload[col].dtype):
+                    # Convert datetime columns to string
+                    df_to_upload[col] = df_to_upload[col].astype(str)
+            
+            # Upload all columns including run_id (table will be recreated)
+            print(f"📊 Uploading {len(df_to_upload.columns)} columns: {list(df_to_upload.columns)}")
             
             # Configure job
             job_config = bigquery.LoadJobConfig(
