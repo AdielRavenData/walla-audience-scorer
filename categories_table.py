@@ -56,6 +56,7 @@ class CategoriesAudienceSummaryGenerator:
             WITH run_users AS (
                 SELECT DISTINCT user_unique_id 
                 FROM `{self.project_id}.UsersClustering.users_with_audience_score`
+                WHERE audience = '{audience}' AND run_id = {run_id}
             )
             SELECT  
                 a.user_unique_id,
@@ -193,9 +194,17 @@ def main():
         run_id_input = input("Enter run_id (or press Enter for '1'): ").strip()
         run_id = int(run_id_input) if run_id_input else 1
         
-        # Get audience from user
-        audience_input = input("Enter audience (or press Enter for 'אקדמאים'): ").strip()
-        audience = audience_input if audience_input else "אקדמאים"
+        # Get audience from user with predefined options
+        print("\nAvailable audience options:")
+        print("1. אקדמאים (Academics)")
+        print("2. הייטקיסטים (Tech Professionals)")
+        
+        audience_choice = input("Select audience (1 or 2, or press Enter for 'אקדמאים'): ").strip()
+        
+        if audience_choice == "2":
+            audience = "הייטקיסטים"
+        else:
+            audience = "אקדמאים"  # Default option
         
         # Ask user for table name
         table_name = "categories_audience_summary"

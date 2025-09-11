@@ -44,63 +44,139 @@ class AugustUserMetricsGenerator:
     Generates user behavioral metrics from august_features table.
     """
     
-    # Academic-relevant verticals for filtering (expanded from 3 to 16)
-    ACADEMIC_VERTICALS = [
-        # Cultural & Arts
-        'תרבות', 'יהדות', 'פיס בתרבות',
-        # Professional & Business  
-        'קריירה', 'המומחים', 'זירת היועצים', 'עסקים קטנים', 'marketing',
-        # Health & Science
-        'בריאות', 'מדעני העתיד',
-        # Other Academic
-        'הנבחרים', 'טוב לדעת', 'עזרה', 'אולימפיאדת טוקיו 2020', 'מגזין', 'משפט'
-    ]
+    # Audience configurations
+    AUDIENCES = {
+        'אקדמאים': {
+            'verticals': [
+                # Cultural & Arts
+                'תרבות', 'יהדות', 'פיס בתרבות',
+                # Professional & Business  
+                'קריירה', 'המומחים', 'זירת היועצים', 'עסקים קטנים', 'marketing',
+                # Health & Science
+                'בריאות', 'מדעני העתיד',
+                # Other Academic
+                'הנבחרים', 'טוב לדעת', 'עזרה', 'אולימפיאדת טוקיו 2020', 'מגזין', 'משפט'
+            ],
+            'stem_keywords': [
+                # Core academic terms
+                'אקדמ', 'אוניברסיט', 'מחקר', 'מדע', 'מדעי', 'פילוסופ', 'היסטור', 'סוציולוג', 'כלכל', 'ביולוג', 'כימ', 'פיז',
+                # Education and learning
+                'חינוך', 'לימוד', 'קורס', 'הרצאה', 'כנס', 'סמינר', 'השכלה', 'תואר', 'דוקטור', 'פרופסור',
+                # Culture and arts
+                'תרבות', 'אמנות', 'מוזיקה', 'שירה', 'ספר', 'ספרות', 'תיאטרון', 'מחול', 'בלט', 'אופרה',
+                # Analysis and criticism
+                'ביקורת', 'ניתוח', 'מאמר', 'כתב', 'מגזין', 'כתב עת', 'סקירה', 'דעה', 'דיון', 'ויכוח',
+                # Research and study
+                'סקר', 'סטטיסטיקה', 'נתונים', 'ממצאים', 'תוצאות', 'מסקנות', 'המלצות', 'הערכה'
+            ],
+            'exact_keywords': [
+                # Academic institutions and concepts
+                'אוניברסיטה', 'מכללה', 'מכון', 'מרכז מחקר', 'מעבדה', 'ספרייה', 'ארכיון', 'מוזיאון',
+                # Cultural and artistic terms
+                'ביקורת ספרים', 'ביקורת הופעה', 'ביקורת סרט', 'ביקורת תיאטרון', 'ביקורת אמנות',
+                'תרבות ישראלית', 'תרבות עברית', 'אמנות ישראלית', 'מוזיקה ישראלית', 'שירה עברית',
+                # Academic writing
+                'מאמר אקדמי', 'מחקר אקדמי', 'דוקטורט', 'תזה', 'דיסרטציה', 'מונוגרפיה',
+                # Historical and philosophical terms
+                'היסטוריה ישראלית', 'היסטוריה יהודית', 'פילוסופיה יהודית', 'מחשבת ישראל',
+                # Literary terms
+                'ספרות עברית', 'ספרות ישראלית', 'שירה עברית', 'פרוזה', 'שירה', 'רומן', 'נובלה',
+                # Academic events
+                'כנס אקדמי', 'הרצאה אקדמית', 'סמינר אקדמי', 'קונגרס', 'סימפוזיון'
+            ],
+            'negative_keywords': [
+                # Car and transportation (very common in dataset)
+                'רכב', 'מכונית', 'טיגו', 'היילקס', 'היברידי', 'חשמלית', 'דרכים', 'מבחן', 'מבחן דרכים', 'חוות דעת',
+                # Sports
+                'כדורגל', 'כדורסל', 'ליגה', 'שער', 'משחק', 'ספורט', 'מכבי', 'הפועל',
+                # Food and cooking
+                'מתכון', 'מסעד', 'בישול', 'השווארמ', 'אוכל', 'מסעדה', 'בישול',
+                # Entertainment and celebrities
+                'צפייה ישירה', 'VOD', 'פרק', 'סדרה', 'טריילר', 'לייב', 'פלייבוי', 'סלב', 'סלבס',
+                # Shopping and commerce
+                'שופינג', 'מבצע', 'חינם', 'קניון', 'קנייה', 'מחיר', 'שקל', 'אלף שקל',
+                # Technology (unless academic)
+                'iPhone', 'אנדרואיד', 'סמארטפון', 'אפליקציה', 'גיימינג', 'משחקים'
+            ]
+        },
+        'הייטקיסטים': {
+            'verticals': [
+                # Technology & Innovation (from actual data)
+                'TECH', 'gaming', 'gamerplus', 'get smart',
+                # Business & Finance
+                'קריירה', 'המומחים', 'זירת היועצים', 'עסקים קטנים', 'marketing', 'כסף',
+                # Science & Research
+                'מדעני העתיד', 'העתיד ירוק', 'שומרים על כדור הארץ',
+                # Professional Development
+                'הנבחרים', 'טוב לדעת', 'עזרה', 'מגזין',
+                # Business & Entrepreneurship
+                'העסק של כולנו', 'זירת הנדל״ן', 'נדל״ן',
+                # Innovation & Future
+                'העתיד ירוק', '65 + עתיד בריא', 'הגמרא הדיגיטלית'
+            ],
+            'stem_keywords': [
+                # Technology terms (from actual page titles)
+                'טכנולוגיה', 'הייטק', 'סטארטאפ', 'חדשנות', 'דיגיטל', 'אינטרנט', 'מחשבים', 'תוכנה', 'חומרה',
+                # Tech companies and products (from actual data)
+                'אפל', 'iPhone', 'ספוטיפיי', 'ChatGPT', 'גוגל', 'פייסבוק', 'מיקרוסופט', 'אמזון',
+                # Programming and development
+                'תכנות', 'פיתוח', 'קוד', 'אלגוריתם', 'בינה מלאכותית', 'למידת מכונה', 'ביג דאטה', 'ענן',
+                # Business and entrepreneurship
+                'עסקים', 'השקעות', 'בורסה', 'פיננסים', 'קריירה', 'יזמות', 'מיזם', 'חברה', 'מחיר', 'צרכנות',
+                # Science and engineering
+                'מדע', 'מחקר', 'הנדסה', 'פיתוח', 'חדשנות', 'טכנולוגיה', 'מעבדה', 'ניסוי',
+                # Professional terms
+                'הכשרה', 'הדרכה', 'מנטורינג', 'נטוורקינג', 'קריירה', 'מקצוע', 'מומחיות',
+                # Gaming and entertainment tech
+                'גיימינג', 'משחקים', 'אפליקציה', 'סמארטפון', 'אנדרואיד'
+            ],
+            'exact_keywords': [
+                # Technology companies and platforms (from actual page titles)
+                'גוגל', 'פייסבוק', 'אפל', 'מיקרוסופט', 'אמזון', 'נטפליקס', 'ספוטיפיי', 'iPhone', 'ChatGPT',
+                # Israeli tech companies
+                'צק פוינט', 'וואו', 'מובילאיי', 'אינטל', 'IBM', 'סיסקו', 'אורקל',
+                # Programming languages and frameworks
+                'פייתון', 'גאווה', 'JavaScript', 'React', 'Angular', 'Node.js', 'Docker', 'Kubernetes',
+                # Tech concepts
+                'בינה מלאכותית', 'למידת מכונה', 'ביג דאטה', 'ענן', 'סייבר', 'בלוקציין', 'קריפטו',
+                # Professional development
+                'האקאתון', 'כנס טכנולוגיה', 'מפגש מפתחים', 'קהילת מפתחים', 'בוטקמפ',
+                # Business and finance terms (from actual data)
+                'מחירי הסוכר', 'מחירים', 'צרכנות', 'השקעות', 'בורסה', 'פיננסים'
+            ],
+            'negative_keywords': [
+                # Entertainment and celebrities (from actual data)
+                'VOD', 'פרק', 'סדרה', 'טריילר', 'לייב', 'פלייבוי', 'סלב', 'סלבס', 'ביקורת סרט', 'ביקורת הופעה',
+                # Sports (from actual data)
+                'כדורגל', 'כדורסל', 'ליגה', 'שער', 'משחק', 'ספורט', 'מכבי', 'הפועל', 'לייקרס', 'המילטון',
+                # Food and cooking
+                'מתכון', 'מסעד', 'בישול', 'השווארמ', 'אוכל', 'מסעדה', 'בישול', 'ביקיני',
+                # Academic culture (unless tech-related)
+                'ביקורת ספרים', 'ביקורת תיאטרון', 'ביקורת אמנות', 'ספרות', 'שירה', 'רומן', 'תיאטרון', 'מחול',
+                # Celebrity and fashion (from actual data)
+                'נועה קירל', 'ביקיני', 'אופנה', 'בננהוט',
+                # Academic institutions (unless tech-related)
+                'אוניברסיטה', 'מכללה', 'תואר', 'דוקטורט', 'מחקר אקדמי', 'פרופסור'
+            ]
+        }
+    }
     
-    # Academic keywords for content scoring
-    STEM_KEYWORDS = [
-        # Core academic terms
-        'אקדמ', 'אוניברסיט', 'מחקר', 'מדע', 'מדעי', 'פילוסופ', 'היסטור', 'סוציולוג', 'כלכל', 'ביולוג', 'כימ', 'פיז',
-        # Education and learning
-        'חינוך', 'לימוד', 'קורס', 'הרצאה', 'כנס', 'סמינר', 'השכלה', 'תואר', 'דוקטור', 'פרופסור',
-        # Culture and arts
-        'תרבות', 'אמנות', 'מוזיקה', 'שירה', 'ספר', 'ספרות', 'תיאטרון', 'מחול', 'בלט', 'אופרה',
-        # Analysis and criticism
-        'ביקורת', 'ניתוח', 'מאמר', 'כתב', 'מגזין', 'כתב עת', 'סקירה', 'דעה', 'דיון', 'ויכוח',
-        # Research and study
-        'סקר', 'סטטיסטיקה', 'נתונים', 'ממצאים', 'תוצאות', 'מסקנות', 'המלצות', 'הערכה'
-    ]
+    # Legacy attributes for backward compatibility
+    @property
+    def ACADEMIC_VERTICALS(self):
+        return self.AUDIENCES['אקדמאים']['verticals']
     
-    EXACT_KEYWORDS = [
-        # Academic institutions and concepts
-        'אוניברסיטה', 'מכללה', 'מכון', 'מרכז מחקר', 'מעבדה', 'ספרייה', 'ארכיון', 'מוזיאון',
-        # Cultural and artistic terms
-        'ביקורת ספרים', 'ביקורת הופעה', 'ביקורת סרט', 'ביקורת תיאטרון', 'ביקורת אמנות',
-        'תרבות ישראלית', 'תרבות עברית', 'אמנות ישראלית', 'מוזיקה ישראלית', 'שירה עברית',
-        # Academic writing
-        'מאמר אקדמי', 'מחקר אקדמי', 'דוקטורט', 'תזה', 'דיסרטציה', 'מונוגרפיה',
-        # Historical and philosophical terms
-        'היסטוריה ישראלית', 'היסטוריה יהודית', 'פילוסופיה יהודית', 'מחשבת ישראל',
-        # Literary terms
-        'ספרות עברית', 'ספרות ישראלית', 'שירה עברית', 'פרוזה', 'שירה', 'רומן', 'נובלה',
-        # Academic events
-        'כנס אקדמי', 'הרצאה אקדמית', 'סמינר אקדמי', 'קונגרס', 'סימפוזיון'
-    ]
+    @property
+    def STEM_KEYWORDS(self):
+        return self.AUDIENCES['אקדמאים']['stem_keywords']
     
-    # Negative keywords for academic content filtering
-    NEGATIVE_KEYWORDS = [
-        # Car and transportation (very common in dataset)
-        'רכב', 'מכונית', 'טיגו', 'היילקס', 'היברידי', 'חשמלית', 'דרכים', 'מבחן', 'מבחן דרכים', 'חוות דעת',
-        # Sports
-        'כדורגל', 'כדורסל', 'ליגה', 'שער', 'משחק', 'ספורט', 'מכבי', 'הפועל',
-        # Food and cooking
-        'מתכון', 'מסעד', 'בישול', 'השווארמ', 'אוכל', 'מסעדה', 'בישול',
-        # Entertainment and celebrities
-        'צפייה ישירה', 'VOD', 'פרק', 'סדרה', 'טריילר', 'לייב', 'פלייבוי', 'סלב', 'סלבס',
-        # Shopping and commerce
-        'שופינג', 'מבצע', 'חינם', 'קניון', 'קנייה', 'מחיר', 'שקל', 'אלף שקל',
-        # Technology (unless academic)
-        'iPhone', 'אנדרואיד', 'סמארטפון', 'אפליקציה', 'גיימינג', 'משחקים'
-    ]
+    @property
+    def EXACT_KEYWORDS(self):
+        return self.AUDIENCES['אקדמאים']['exact_keywords']
+    
+    @property
+    def NEGATIVE_KEYWORDS(self):
+        return self.AUDIENCES['אקדמאים']['negative_keywords']
     
     def __init__(self, project_id: str = "wallabi-169712"):
         """
@@ -115,35 +191,30 @@ class AugustUserMetricsGenerator:
         
         logger.info(f"Initialized AugustUserMetricsGenerator for project: {project_id}")
     
-    def fetch_august_data(self, max_users: int = None, academic_verticals_only: bool = False, audience_title_filtering: bool = False) -> pd.DataFrame:
+    def fetch_august_data(self, max_users: int = None, audience: str = 'אקדמאים') -> pd.DataFrame:
         """
         Fetch data from august_features table.
         
         Args:
             max_users (int): Optional limit on number of users to fetch
-            academic_verticals_only (bool): If True, only fetch users with academic vertical interactions
-            audience_title_filtering (bool): If True, only fetch users who viewed audience-relevant page titles
+            audience (str): Audience type ('אקדמאים' or 'הייטקיסטים')
             
         Returns:
             pd.DataFrame: Raw interaction data
         """
-        logger.info(f"Fetching data from {self.src_table} (optimized: academic users only)...")
+        logger.info(f"Fetching data from {self.src_table} (audience: {audience})...")
         
-        # Build optimized query: first filter for users who viewed academic content, then get all their interactions
-        if audience_title_filtering:
-            # Most optimized: Only users who viewed audience-relevant page titles
-            query = self._build_audience_title_filtering_query(max_users)
-        elif academic_verticals_only:
-            verticals_list = "', '".join(self.ACADEMIC_VERTICALS)
-            
-            # Create academic keywords pattern for page title filtering
-            stem_pattern = '|'.join(self.STEM_KEYWORDS)
-            exact_pattern = '|'.join(self.EXACT_KEYWORDS)
-            
-            if max_users:
-                query = f"""
-                WITH academic_users AS (
-                    SELECT DISTINCT user_unique_id
+        # Get audience-specific keywords
+        audience_config = self.AUDIENCES[audience]
+        verticals_list = "', '".join(audience_config['verticals'])
+        stem_pattern = '|'.join(audience_config['stem_keywords'])
+        exact_pattern = '|'.join(audience_config['exact_keywords'])
+        
+        # Build optimized query: first filter for users who viewed audience-relevant content, then get all their interactions
+        if max_users:
+            query = f"""
+            WITH audience_users AS (
+                SELECT DISTINCT user_unique_id
                     FROM `{self.project_id}.UsersClustering.{self.src_table}`
                     WHERE vertical_name IN ('{verticals_list}')
                       AND page_title IS NOT NULL
@@ -171,66 +242,23 @@ class AugustUserMetricsGenerator:
                     t.device_category,
                     t.sector
                 FROM `{self.project_id}.UsersClustering.{self.src_table}` t
-                INNER JOIN academic_users a ON t.user_unique_id = a.user_unique_id
-                """
-            else:
-                query = f"""
-                WITH academic_users AS (
-                    SELECT DISTINCT user_unique_id
-                    FROM `{self.project_id}.UsersClustering.{self.src_table}`
-                    WHERE vertical_name IN ('{verticals_list}')
-                      AND page_title IS NOT NULL
-                      AND (
-                        -- Check for academic keywords in page titles
-                        REGEXP_CONTAINS(page_title, r'(?i)({stem_pattern})')
-                        OR
-                        -- Check for exact academic terms
-                        REGEXP_CONTAINS(page_title, r'(?i)({exact_pattern})')
-                      )
-                )
-                SELECT 
-                    t.user_unique_id,
-                    t.event_date,
-                    t.time_stamp,
-                    t.vertical_name,
-                    t.CategoryName,
-                    t.page_title,
-                    t.item_title,
-                    t.hour_of_day,
-                    t.day_of_week,
-                    t.region,
-                    t.city,
-                    t.device_category,
-                    t.sector
-                FROM `{self.project_id}.UsersClustering.{self.src_table}` t
-                INNER JOIN academic_users a ON t.user_unique_id = a.user_unique_id
+                INNER JOIN audience_users a ON t.user_unique_id = a.user_unique_id
                 """
         else:
-            if max_users:
-                query = f"""
-                SELECT 
-                    t.user_unique_id,
-                    t.event_date,
-                    t.time_stamp,
-                    t.vertical_name,
-                    t.CategoryName,
-                    t.page_title,
-                    t.item_title,
-                    t.hour_of_day,
-                    t.day_of_week,
-                    t.region,
-                    t.city,
-                    t.device_category,
-                    t.sector
-                FROM `{self.project_id}.UsersClustering.{self.src_table}`
-                WHERE user_unique_id IN (
-                    SELECT DISTINCT user_unique_id 
+            query = f"""
+            WITH audience_users AS (
+                    SELECT DISTINCT user_unique_id
                     FROM `{self.project_id}.UsersClustering.{self.src_table}`
-                    LIMIT {max_users}
+                    WHERE vertical_name IN ('{verticals_list}')
+                      AND page_title IS NOT NULL
+                      AND (
+                        -- Check for academic keywords in page titles
+                        REGEXP_CONTAINS(page_title, r'(?i)({stem_pattern})')
+                        OR
+                        -- Check for exact academic terms
+                        REGEXP_CONTAINS(page_title, r'(?i)({exact_pattern})')
+                      )
                 )
-                """
-            else:
-                query = f"""
                 SELECT 
                     t.user_unique_id,
                     t.event_date,
@@ -245,7 +273,8 @@ class AugustUserMetricsGenerator:
                     t.city,
                     t.device_category,
                     t.sector
-                FROM `{self.project_id}.UsersClustering.{self.src_table}`
+                FROM `{self.project_id}.UsersClustering.{self.src_table}` t
+                INNER JOIN audience_users a ON t.user_unique_id = a.user_unique_id
                 """
         
         try:
@@ -772,7 +801,7 @@ class AugustUserMetricsGenerator:
             logger.warning(f"Could not check BigQuery table for run_id: {e}, starting with run_id: 1")
             return 1
 
-    def generate_metrics(self, max_users: int = None, output_file: str = "august_user_metrics.csv", append_to_table: bool = False, table_name: str = "users_with_audience_score", save_to_file: bool = True) -> pd.DataFrame:
+    def generate_metrics(self, max_users: int = None, output_file: str = "august_user_metrics.csv", append_to_table: bool = False, table_name: str = "users_with_audience_score", save_to_file: bool = True, audience: str = 'אקדמאים') -> pd.DataFrame:
         """
         Main method to generate user metrics from august data.
         
@@ -792,7 +821,7 @@ class AugustUserMetricsGenerator:
         try:
             # Step 1: Fetch data (optimized: only users who viewed academic content)
             print("📊 Step 1/3: Fetching data from august_feature (audience title filtering)...")
-            df = self.fetch_august_data(max_users, audience_title_filtering=True)
+            df = self.fetch_august_data(max_users, audience)
             
             if df.empty:
                 logger.warning("No data found")
@@ -814,9 +843,9 @@ class AugustUserMetricsGenerator:
             user_metrics['run_id'] = run_id
             print(f"✅ Added run_id: {run_id}")
             
-            # Step 3: Calculate academic audience scores (no vertical filtering needed - already pre-filtered)
-            print("🎓 Step 3/4: Calculating academic audience scores...")
-            audience_scores = self.calculate_audience_scores(df, audience='אקדמאים', min_distinct_categories=1, filter_verticals=False)
+            # Step 3: Calculate audience scores (no vertical filtering needed - already pre-filtered)
+            print(f"🎓 Step 3/4: Calculating {audience} audience scores...")
+            audience_scores = self.calculate_audience_scores(df, audience=audience, min_distinct_categories=1, filter_verticals=False)
             
             # Merge audience scores with user metrics
             if not audience_scores.empty:
@@ -964,6 +993,17 @@ def main():
     except ValueError:
         max_users = None
     
+    # Ask for audience selection
+    print("\nSelect audience:")
+    print("1. אקדמאים (Academic)")
+    print("2. הייטקיסטים (Tech)")
+    audience_choice = input("Enter choice (1 or 2, default: 1): ").strip()
+    
+    if audience_choice == "2":
+        audience = "הייטקיסטים"
+    else:
+        audience = "אקדמאים"
+    
     output_file = input("Enter output CSV file (default: august_user_metrics.csv): ").strip() or "august_user_metrics.csv"
     
     # Ask about saving to file
@@ -980,6 +1020,7 @@ def main():
         table_name = custom_table if custom_table else table_name
     
     print(f"\nStarting metrics generation...")
+    print(f"Audience: {audience}")
     print(f"Max users: {max_users if max_users else 'All users'}")
     print(f"Output file: {output_file}")
     print(f"Save to file: {'Yes' if save_to_file else 'No'}")
@@ -990,7 +1031,7 @@ def main():
     
     # Initialize generator and run analysis
     generator = AugustUserMetricsGenerator()
-    results = generator.generate_metrics(max_users, output_file, append_to_table, table_name, save_to_file)
+    results = generator.generate_metrics(max_users, output_file, append_to_table, table_name, save_to_file, audience)
     
     if results.empty:
         print("No results generated. Please check your inputs and try again.")
